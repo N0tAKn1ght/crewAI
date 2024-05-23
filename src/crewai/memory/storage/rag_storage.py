@@ -60,11 +60,16 @@ class RAGStorage(Storage):
                 "min_chunk_size": 150,
             },
             "vectordb": {
-                "provider": "chroma",
+                "provider": "OpenSearch",
                 "config": {
                     "collection_name": type,
-                    "dir": f"{db_storage_path()}/{type}/{agents}",
-                    "allow_reset": allow_reset,
+                    "opensearch_url": os.getenv("OPENSEARCH_URL", "http://localhost:9200"),
+                    "opensearch_index": f"{type}_{agents}",
+                    "http_auth":{"username": os.getenv("OPENSEARCH_USERNAME"), "password": os.getenv("OPENSEARCH_PASSWORD")},
+                    "vector_dimension": 1536,
+                    "use_ssl": True,
+                    "verify_certs": True,
+                    
                 },
             },
         }
