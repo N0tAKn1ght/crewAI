@@ -133,6 +133,26 @@ class Agent(BaseAgent):
                 agentops.stop_instrumenting()
                 self.llm.callbacks.append(agentops.LangchainCallbackHandler())
 
+        if hasattr(self.llm, "model_id"):
+            token_handler = TokenCalcHandler(self.llm.model_id, self._token_process)
+
+            # Ensure self.llm.callbacks is a list
+            if not isinstance(self.llm.callbacks, list):
+                self.llm.callbacks = []
+
+            # Check if an instance of TokenCalcHandler already exists in the list
+            if not any(
+                isinstance(handler, TokenCalcHandler) for handler in self.llm.callbacks
+            ):
+                self.llm.callbacks.append(token_handler)
+
+            if agentops and not any(
+                isinstance(handler, agentops.LangchainCallbackHandler)
+                for handler in self.llm.callbacks
+            ):
+                agentops.stop_instrumenting()
+                self.llm.callbacks.append(agentops.LangchainCallbackHandler())
+
         if not self.agent_executor:
             if not self.cache_handler:
                 self.cache_handler = CacheHandler()
