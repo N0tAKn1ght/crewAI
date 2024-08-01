@@ -3,7 +3,7 @@ from unittest import mock
 import pytest
 from click.testing import CliRunner
 
-from crewai.cli.cli import train, version, reset_memories
+from crewai.cli.cli import reset_memories, test, train, version
 
 
 @pytest.fixture
@@ -132,4 +132,34 @@ def test_version_command_with_tools(runner):
     assert (
         "crewai tools version:" in result.output
         or "crewai tools not installed" in result.output
+    )
+
+
+@mock.patch("crewai.cli.cli.evaluate_crew")
+def test_test_default_iterations(evaluate_crew, runner):
+    result = runner.invoke(test)
+
+    evaluate_crew.assert_called_once_with(3, "gpt-4o-mini")
+    assert result.exit_code == 0
+    assert "Testing the crew for 3 iterations with model gpt-4o-mini" in result.output
+
+
+@mock.patch("crewai.cli.cli.evaluate_crew")
+def test_test_custom_iterations(evaluate_crew, runner):
+    result = runner.invoke(test, ["--n_iterations", "5", "--model", "gpt-4o"])
+
+    evaluate_crew.assert_called_once_with(5, "gpt-4o")
+    assert result.exit_code == 0
+    assert "Testing the crew for 5 iterations with model gpt-4o" in result.output
+
+
+@mock.patch("crewai.cli.cli.evaluate_crew")
+def test_test_invalid_string_iterations(evaluate_crew, runner):
+    result = runner.invoke(test, ["--n_iterations", "invalid"])
+
+    evaluate_crew.assert_not_called()
+    assert result.exit_code == 2
+    assert (
+        "Usage: test [OPTIONS]\nTry 'test --help' for help.\n\nError: Invalid value for '-n' / '--n_iterations': 'invalid' is not a valid integer.\n"
+        in result.output
     )
