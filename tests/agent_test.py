@@ -4,10 +4,6 @@ from unittest import mock
 from unittest.mock import patch
 
 import pytest
-from langchain.tools import tool
-from langchain_core.exceptions import OutputParserException
-from langchain_openai import ChatOpenAI
-
 from crewai import Agent, Crew, Task
 from crewai.agents.cache import CacheHandler
 from crewai.agents.executor import CrewAgentExecutor
@@ -15,6 +11,10 @@ from crewai.agents.parser import CrewAgentParser
 from crewai.tools.tool_calling import InstructorToolCalling
 from crewai.tools.tool_usage import ToolUsage
 from crewai.utilities import RPMController
+from langchain.schema import AgentAction
+from langchain.tools import tool
+from langchain_core.exceptions import OutputParserException
+from langchain_openai import ChatOpenAI
 
 
 def test_agent_creation():
@@ -469,7 +469,7 @@ def test_agent_respect_the_max_rpm_set_over_crew_rpm(capsys):
         agent=agent,
     )
 
-    crew = Crew(agents=[agent], tasks=[task], max_rpm=1, verbose=2)
+    crew = Crew(agents=[agent], tasks=[task], max_rpm=1, verbose=True)
 
     with patch.object(RPMController, "_wait_for_next_minute") as moveon:
         moveon.return_value = True
@@ -521,7 +521,7 @@ def test_agent_without_max_rpm_respet_crew_rpm(capsys):
         ),
     ]
 
-    crew = Crew(agents=[agent1, agent2], tasks=tasks, max_rpm=1, verbose=2)
+    crew = Crew(agents=[agent1, agent2], tasks=tasks, max_rpm=1, verbose=True)
 
     with patch.object(RPMController, "_wait_for_next_minute") as moveon:
         moveon.return_value = True
@@ -562,7 +562,7 @@ def test_agent_error_on_parsing_tool(capsys):
     crew = Crew(
         agents=[agent1],
         tasks=tasks,
-        verbose=2,
+        verbose=True,
         function_calling_llm=ChatOpenAI(model="gpt-4-0125-preview"),
     )
 
@@ -601,7 +601,7 @@ def test_agent_remembers_output_format_after_using_tools_too_many_times():
         )
     ]
 
-    crew = Crew(agents=[agent1], tasks=tasks, verbose=2)
+    crew = Crew(agents=[agent1], tasks=tasks, verbose=True)
 
     with patch.object(ToolUsage, "_remember_format") as remember_format:
         crew.kickoff()
@@ -816,7 +816,7 @@ def test_agent_definition_based_on_dict():
         "verbose": True,
     }
 
-    agent = Agent(config=config)
+    agent = Agent(**config)
 
     assert agent.role == "test role"
     assert agent.goal == "test goal"
@@ -836,7 +836,7 @@ def test_agent_human_input():
         "backstory": "test backstory",
     }
 
-    agent = Agent(config=config)
+    agent = Agent(**config)
 
     task = Task(
         agent=agent,
@@ -1014,3 +1014,75 @@ def test_agent_max_retry_limit():
                 ),
             ]
         )
+
+
+@pytest.mark.vcr(filter_headers=["authorization"])
+def test_handle_context_length_exceeds_limit():
+    agent = Agent(
+        role="test role",
+        goal="test goal",
+        backstory="test backstory",
+    )
+    original_action = AgentAction(
+        tool="test_tool", tool_input="test_input", log="test_log"
+    )
+
+    with patch.object(
+        CrewAgentExecutor, "_iter_next_step", wraps=agent.agent_executor._iter_next_step
+    ) as private_mock:
+        task = Task(
+            description="The final answer is 42. But don't give it yet, instead keep using the `get_final_answer` tool.",
+            expected_output="The final answer",
+        )
+        agent.execute_task(
+            task=task,
+        )
+        private_mock.assert_called_once()
+        with patch("crewai.agents.executor.click") as mock_prompt:
+            mock_prompt.return_value = "y"
+            with patch.object(
+                CrewAgentExecutor, "_handle_context_length"
+            ) as mock_handle_context:
+                mock_handle_context.side_effect = ValueError(
+                    "Context length limit exceeded"
+                )
+
+                long_input = "This is a very long input. " * 10000
+
+                # Attempt to handle context length, expecting the mocked error
+                with pytest.raises(ValueError) as excinfo:
+                    agent.agent_executor._handle_context_length(
+                        [(original_action, long_input)]
+                    )
+
+                assert "Context length limit exceeded" in str(excinfo.value)
+                mock_handle_context.assert_called_once()
+
+
+@pytest.mark.vcr(filter_headers=["authorization"])
+def test_handle_context_length_exceeds_limit_cli_no():
+    agent = Agent(
+        role="test role",
+        goal="test goal",
+        backstory="test backstory",
+    )
+    task = Task(description="test task", agent=agent, expected_output="test output")
+
+    with patch.object(
+        CrewAgentExecutor, "_iter_next_step", wraps=agent.agent_executor._iter_next_step
+    ) as private_mock:
+        task = Task(
+            description="The final answer is 42. But don't give it yet, instead keep using the `get_final_answer` tool.",
+            expected_output="The final answer",
+        )
+        agent.execute_task(
+            task=task,
+        )
+        private_mock.assert_called_once()
+        with patch("crewai.agents.executor.click") as mock_prompt:
+            mock_prompt.return_value = "n"
+            pytest.raises(SystemExit)
+            with patch.object(
+                CrewAgentExecutor, "_handle_context_length"
+            ) as mock_handle_context:
+                mock_handle_context.assert_not_called()
